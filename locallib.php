@@ -366,8 +366,72 @@ function block_lw_courses_build_progress($course) {
                 $completionpercentage = intval($completionstatus->min / $completionstatus->max * 100);
             }
 
+            //use activity completion instead of course completion ?
+            $useActivityCompletion = true;
+            
+            //Progress bar based on activity completion
+            // Default completion object.
+            $compobj = (object) [
+                'complete' => null,
+                'total' => null,
+                'progress' => null,
+                'fromcache' => false, // Useful for debugging and unit testing.
+                'render' => false // Template flag.
+            ];
+            
+            if (!isloggedin() || isguestuser() || !$CFG->enablecompletion || !$course->enablecompletion) {
+                // Can't get completion progress for users who aren't logged in.
+                // Or if completion tracking is not enabled at site / course level.
+                // Don't even bother with the cache, just return empty object.
+                return $compobj;
+            }
+            
+            $completioninfo = new \completion_info($course);
+            $trackcount = 0;
+            $compcount = 0;
+            if ($completioninfo->is_enabled()) {
+                $modinfo = get_fast_modinfo($course);
+                
+                foreach ($modinfo->cms as $thismod) {
+                    if (!$thismod->uservisible) {
+                            // Skip when mod is not user visible.
+                            continue;
+                        }
+                        $completioninfo->get_data($thismod, true);
+                
+                    if ($completioninfo->is_enabled($thismod) != COMPLETION_TRACKING_NONE) {
+                        $trackcount++;
+                        $completiondata = $completioninfo->get_data($thismod, true);
+                        if ($completiondata->completionstate == COMPLETION_COMPLETE ||
+                            $completiondata->completionstate == COMPLETION_COMPLETE_PASS) {
+                            $compcount++;
+                        }
+                    }
+                }
+            }
+            
+            if ($trackcount > 0) {
+                $progresspercent = ceil(($compcount / $trackcount) * 100);
+                $compobj = (object) [
+                    'complete' => $compcount,
+                    'total' => $trackcount,
+                    'progress' => $progresspercent,
+                    'timestamp' => microtime(true),
+                    'fromcache' => false,
+                    'render' => true
+                ];
+            } else {
+                    // Everything except timestamp is null because nothing is trackable at the moment.
+                    // We still want to cache this though to avoid repeated unnecessary db calls.
+                    $compobj->timestamp = microtime(true);
+            }
+                        
+            if (useActivityCompletion) {
+                $completionpercentage = $compobj->progress;
+            }
+
             $bar = html_writer::div("$completionpercentage%", 'progress-bar', array('aria-valuenow' => "$completionpercentage",
-                'aria-valuemin' => "0", 'aria-valuemax' => "100", 'style' => "width:$completionpercentage%"));
+            'aria-valuemin' => "0", 'aria-valuemax' => "100", 'style' => "width:$completionpercentage%"));
             $progress = html_writer::div($bar, 'progress');
 
             return $progress;
